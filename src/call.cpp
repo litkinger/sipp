@@ -514,7 +514,8 @@ void call::init(scenario * call_scenario, SIPpSocket *socket, struct sockaddr_st
     memset(&(play_args_i.from), 0, sizeof(struct sockaddr_storage));
     memset(&(play_args_v.from), 0, sizeof(struct sockaddr_storage));
     hasMediaInformation = 0;
-    media_thread = 0;
+    media_thread_a = 0;
+    media_thread_v = 0;
 #endif
 
     peer_tag = NULL;
@@ -640,9 +641,15 @@ call::~call()
     }
 
 # ifdef PCAPPLAY
-    if (media_thread != 0) {
-        pthread_cancel(media_thread);
-        pthread_join(media_thread, NULL);
+    if (media_thread_a != 0) {
+        pthread_cancel(media_thread_a);
+        pthread_join(media_thread_a, NULL);
+        media_thread_a = 0;
+    }
+    if (media_thread_v != 0) {
+        pthread_cancel(media_thread_v);
+        pthread_join(media_thread_v, NULL);
+        media_thread_v = 0;
     }
 #endif
 
@@ -3722,6 +3729,8 @@ call::T_ActionResult call::executeAction(const char* msg, message* curmsg)
                    (currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_VIDEO) ||
                    (currentAction->getActionType() == CAction::E_AT_PLAY_DTMF)) {
             play_args_t* play_args = 0;
+            pthread_t* media_thread = &media_thread_a;
+
             if ((currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_AUDIO) ||
                 (currentAction->getActionType() == CAction::E_AT_PLAY_DTMF)) {
                 play_args = &(this->play_args_a);
@@ -3729,16 +3738,17 @@ call::T_ActionResult call::executeAction(const char* msg, message* curmsg)
                 play_args = &(this->play_args_i);
             } else if (currentAction->getActionType() == CAction::E_AT_PLAY_PCAP_VIDEO) {
                 play_args = &(this->play_args_v);
+                media_thread = &media_thread_v;
             } else {
                 ERROR("Can't find pcap data to play");
             }
 
             // existing media thread could be using play_args, so we have to kill it before modifying parameters
-            if (media_thread != 0) {
+            if (*media_thread != 0) {
                 // If a media_thread is already active, kill it before starting a new one
-                pthread_cancel(media_thread);
-                pthread_join(media_thread, NULL);
-                media_thread = 0;
+                pthread_cancel(*media_thread);
+                pthread_join(*media_thread, NULL);
+                *media_thread = 0;
             }
 
             if (currentAction->getActionType() == CAction::E_AT_PLAY_DTMF) {
@@ -3767,7 +3777,7 @@ call::T_ActionResult call::executeAction(const char* msg, message* curmsg)
 #ifndef PTHREAD_STACK_MIN
 #define PTHREAD_STACK_MIN  16384
 #endif
-            int ret = pthread_create(&media_thread, &attr, send_wrapper, play_args);
+            int ret = pthread_create(media_thread, &attr, send_wrapper, play_args);
             if (ret) {
                 ERROR("Can't create thread to send RTP packets");
             }
